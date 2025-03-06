@@ -5,70 +5,21 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/adaptor"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/spf13/viper"
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
+	"microservicetest/pkg/config"
+	_ "microservicetest/pkg/log"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 )
 
-func createLogger() *zap.Logger {
-	encoderCfg := zap.NewProductionEncoderConfig()
-	encoderCfg.TimeKey = "timestamp"
-	encoderCfg.EncodeTime = zapcore.ISO8601TimeEncoder
-
-	config := zap.Config{
-		Level:             zap.NewAtomicLevelAt(zap.InfoLevel),
-		Development:       false,
-		DisableCaller:     false,
-		DisableStacktrace: false,
-		Sampling:          nil,
-		Encoding:          "json",
-		EncoderConfig:     encoderCfg,
-		OutputPaths: []string{
-			"stderr",
-		},
-		ErrorOutputPaths: []string{
-			"stderr",
-		},
-		InitialFields: map[string]interface{}{
-			"pid": os.Getpid(),
-		},
-	}
-
-	return zap.Must(config.Build())
-}
-
-type AppConfig struct {
-	Port string
-}
-
-func readConfig() *AppConfig {
-	viper.SetConfigName("config")   // name of config file (without extension)
-	viper.SetConfigType("yaml")     // REQUIRED if the config file does not have the extension in the name
-	viper.AddConfigPath("./config") // call multiple times to add many search paths
-	viper.AddConfigPath(".")        // optionally look for config in the working directory
-	err := viper.ReadInConfig()     // Find and read the config file
-	if err != nil {                 // Handle errors reading the config file
-		panic(fmt.Errorf("fatal error config file: %w", err))
-	}
-	var appConfig AppConfig
-	err = viper.Unmarshal(&appConfig)
-	if err != nil {
-		panic(fmt.Errorf("fatal error unmarshalling config: %w", err))
-	}
-	return &appConfig
-
-}
 func main() {
-	appConfig := readConfig()
-	logger := createLogger()
-	zap.ReplaceGlobals(logger)
-	defer logger.Sync()
+	appConfig := config.Read()
+	defer zap.L().Sync()
 
 	app := fiber.New()
+
 	app.Get("/metrics", adaptor.HTTPHandler(promhttp.Handler()))
 
 	app.Get("/", func(c *fiber.Ctx) error {
@@ -82,6 +33,9 @@ func main() {
 		}
 	}()
 	zap.L().Info("Server started on port ", zap.String("port", appConfig.Port))
+	gracefulShutdown(app)
+}
+func gracefulShutdown(app *fiber.App) {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
